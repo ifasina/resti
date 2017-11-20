@@ -1,0 +1,4 @@
+*.pyc
+*.sqlite3
+resti/resti/settings.py
+
