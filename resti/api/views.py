@@ -14,14 +14,19 @@ class CommandView(APIView):
 
 	def post(self, request):
 		global apiKey
-		cmd = request.data.get("item").get("message").get("message")
+		cmd, option = request.data.get("item").get("message").get("message").split()
 		msgID = request.data.get("item").get("message").get("id")
-		places = self.getNearByFood(apiKey)
-		
-		if cmd == "/random":
-			food = self.getRandomPlace(places)
-			foodDetails = self.getPlaceDetails(food["place_id"], apiKey)
-			return Response(self.generateHipChatMSG(foodDetails, msgID))
+
+		if cmd == "/food":
+			if option == "random":
+				places = self.getNearByFood(apiKey)
+				food = self.getRandomPlace(places)
+				foodDetails = self.getPlaceDetails(food["place_id"], apiKey)
+				return Response(self.generateHipChatFoodMSG(foodDetails, msgID))
+			elif option == "help":
+				return Response(self.generateHelpMSG())
+			else: 
+				return Response(self.generateGenericHipChatMSG('"{}" Dunno that one...'.format(option)))
 		else:
 			return Response("Error, unknown command", status=404)
 
@@ -45,13 +50,33 @@ class CommandView(APIView):
 
 		return url
 
-	def generateHipChatMSG(self, details, msgID):
+	def generateGenericHipChatMSG(self, msg):
+		toSend = {
+			"color": "yellow",
+			"notify": False,
+			"message_format": "text",
+			"message": msg
+		} 
+
+		return toSend
+
+	def generateHelpMSG(self):
+		toSend = {
+			"color": "yellow",
+			"notify": False,
+			"message_format": "text",
+			"message": "/food [random/help]\nMore commands coming soon."
+		} 
+
+		return toSend
+
+	def generateHipChatFoodMSG(self, details, msgID):
 		toSend = {
 			"color": "green",
 			"notify": False,
 			"message_format": "text"
 		}
-
+		
 		toSend["message"] = details["name"] + "\n" + details["website"]
 		toSend["card"] = self.generateHipChatURLCard(details, msgID)
 
@@ -64,7 +89,7 @@ class CommandView(APIView):
 			"format": "medium",
 			"id": msgID,
 			"title": details["name"],
-			"description": "food.",
+			"description": "Review: " + details["reviews"][0]["text"],
 			"icon": {
 				"url": details["icon"]
 			},
