@@ -6,41 +6,97 @@ import requests
 import time
 import random
 
+apiKey = "AIzaSyDwtlwHszBEkwvJ3ELfl0YW_EAVV0_44LI"
+
 class CommandView(APIView):
 	def get(self, request):
 		return Response({"eat": request.query_params})
 
 	def post(self, request):
+		global apiKey
 		cmd = request.data.get("item").get("message").get("message")
-		places = self.getNearByFood()
-
-
+		msgID = request.data.get("item").get("message").get("id")
+		places = self.getNearByFood(apiKey)
 		
 		if cmd == "/random":
 			food = self.getRandomPlace(places)
-			return Response(self.generateHipChatMSG(food["name"]))
+			foodDetails = self.getPlaceDetails(food["place_id"], apiKey)
+			return Response(self.generateHipChatMSG(foodDetails, msgID))
+		else:
+			return Response("Error, unknown command", status=404)
 
-	def generateHipChatMSG(self, msg):
+	def generatePlaceURL(self, key, pageToken=None, placeID=None):
+		url = ""
+		if placeID:
+			url = "https://maps.googleapis.com/maps/api/place/details/json?"
+		else:
+			url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?"
+
+		if placeID:
+			url += "placeid=" + placeID
+		elif pageToken:
+			url += "pagetoken=" + pageToken
+		else:
+			url += "location=42.423916,-83.427546" #livonia office lol
+			url += "&radius=7000" #within 6ish miles
+			url += "&type=restaurant" #food plz 
+
+		url += "&key=" + key
+
+		return url
+
+	def generateHipChatMSG(self, details, msgID):
 		toSend = {
-			"color": "blue",
-			"message": msg,
+			"color": "green",
 			"notify": False,
 			"message_format": "text"
 		}
 
+		toSend["message"] = details["name"] + "\n" + details["website"]
+		toSend["card"] = self.generateHipChatURLCard(details, msgID)
+
 		return toSend
 
-	def getNearByFood(self):
+	def generateHipChatURLCard(self, details, msgID):
+		card = {
+			"style": "application",
+			"url": details["website"],
+			"format": "medium",
+			"id": msgID,
+			"title": details["name"],
+			"description": "food.",
+			"icon": {
+				"url": details["icon"]
+			},
+			"attributes": self.generateCardAttributes(details)
+		}
+
+		return card
+
+	def generateCardAttributes(self, details):
+		attrs = ["price_level", "rating"]
+		attributes = []
+
+		for attr in attrs:
+			attribute = {
+				"label": attr.split('_')[0].title(),
+				"value": {
+					"label": str(details[attr]).title(),
+					"style": self.getAttrStyle(details[attr], True if attr == "price_level" else False) #yikes...
+				}
+			}
+			attributes.append(attribute)
+		return attributes
+
+	def getNearByFood(self, key):
 		results = []
-		nearbyURL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=42.423916,-83.427546&radius=7000&type=restaurant&key=AIzaSyDwtlwHszBEkwvJ3ELfl0YW_EAVV0_44LI"
+		nearbyURL = self.generatePlaceURL(key)
 		r = requests.get(nearbyURL)
 		response = r.json()
 		results += response["results"]
 
-		print("before", len(results))
-
 		if "next_page_token" in response:
-			nextPageResponse = self.getNextPage(response["next_page_token"])
+			nextPageResponse = self.getNextPage(response["next_page_token"], key)
 			results += nextPageResponse["results"]
 
 		return results
@@ -50,10 +106,10 @@ class CommandView(APIView):
 	Requesting the next page before it is available will return an INVALID_REQUEST response. 
 	Retrying the request with the same next_page_token will return the next page of results.
 	'''
-	def getNextPage(self, token):
+	def getNextPage(self, token, key):
 		attemps = 1
 		time.sleep(2)
-		nextNearbyURL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=" + token + "&key=AIzaSyDwtlwHszBEkwvJ3ELfl0YW_EAVV0_44LI"
+		nextNearbyURL = self.generatePlaceURL(key, token)
 		r = requests.get(nextNearbyURL)
 		response = r.json()
 		while (response["status"] == "IINVALID_REQUEST"):
@@ -65,8 +121,22 @@ class CommandView(APIView):
 				break
 		return r.json()
 
-
 	def getRandomPlace(self, places):
 		randIndex = random.randint(0, len(places) - 1);
 		randPlace = places[randIndex]
 		return randPlace
+
+	def getPlaceDetails(self, placeID, key):
+		placeDetailURL = self.generatePlaceURL(key, None, placeID)
+		r = requests.get(placeDetailURL)
+		return r.json()["result"]
+
+	def getAttrStyle(self, val, price):
+		if val <= 1:
+			return "lozenge-success" if price else "lozenge-error"
+		elif val <= 3.3 and val >= 2:
+			return "lozenge-current" if price else "lozenge"
+		elif val > 3.3 and val <= 4:
+			return "lozenge-error" if price else "lozenge-complete"
+		elif val > 4:
+			return "lozenge-error" if price else "lozenge-success"
