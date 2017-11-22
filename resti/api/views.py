@@ -14,23 +14,28 @@ class CommandView(APIView):
 
 	def post(self, request):
 		global apiKey
-		cmd, option = request.data.get("item").get("message").get("message").split()
+		args = request.data.get("item").get("message").get("message").split()
+
 		msgID = request.data.get("item").get("message").get("id")
 
-		if cmd == "/food":
-			if option == "random":
-				places = self.getNearByFood(apiKey)
+		if args[0] == "/food":
+			if args[1] == "random" or args[1] == "search":
+				places = self.getNearByFood(apiKey, args[2]) if args[1] == "search" else self.getNearByFood(apiKey)
 				food = self.getRandomPlace(places)
+				if len(food) == 0:
+					return Response(self.generateGenericHipChatMSG("Sorry, no results came up.")) 
 				foodDetails = self.getPlaceDetails(food["place_id"], apiKey)
 				return Response(self.generateHipChatFoodMSG(foodDetails, msgID))
-			elif option == "help":
+			elif args[1] == "help":
 				return Response(self.generateHelpMSG())
+			elif args[1] == "search":
+				pass
 			else: 
-				return Response(self.generateGenericHipChatMSG('"{}" Dunno that one...'.format(option)))
+				return Response(self.generateGenericHipChatMSG('"{}" Dunno that one...'.format(args[1])))
 		else:
 			return Response("Error, unknown command", status=404)
 
-	def generatePlaceURL(self, key, pageToken=None, placeID=None):
+	def generatePlaceURL(self, key, pageToken=None, placeID=None, keyword=""):
 		url = ""
 		if placeID:
 			url = "https://maps.googleapis.com/maps/api/place/details/json?"
@@ -44,15 +49,15 @@ class CommandView(APIView):
 		else:
 			url += "location=42.423916,-83.427546" #livonia office lol
 			url += "&radius=7000" #within 6ish miles
-			url += "&type=restaurant" #food plz 
+			url += "&type=restaurant" #food plz
+			url += "&keyword=" + keyword if keyword else ""
 
 		url += "&key=" + key
-
 		return url
 
 	def generateGenericHipChatMSG(self, msg):
 		toSend = {
-			"color": "yellow",
+			"color": "red",
 			"notify": False,
 			"message_format": "text",
 			"message": msg
@@ -65,7 +70,7 @@ class CommandView(APIView):
 			"color": "yellow",
 			"notify": False,
 			"message_format": "text",
-			"message": "/food [random/help]\nMore commands coming soon."
+			"message": "/food [random|search <keyword>|help]"
 		} 
 
 		return toSend
@@ -89,13 +94,13 @@ class CommandView(APIView):
 			"format": "medium",
 			"id": msgID,
 			"title": details["name"],
-			"description": "Review: " + details["reviews"][0]["text"],
+			"description": "Review: " + details["reviews"][0]["text"] if details["reviews"][0]["text"] else "No reviews for this place yet.",
 			"icon": {
 				"url": details["icon"]
 			},
 			"attributes": self.generateCardAttributes(details)
 		}
-
+		print(card)
 		return card
 
 	def generateCardAttributes(self, details):
@@ -103,19 +108,20 @@ class CommandView(APIView):
 		attributes = []
 
 		for attr in attrs:
-			attribute = {
-				"label": attr.split('_')[0].title(),
-				"value": {
-					"label": str(details[attr]).title(),
-					"style": self.getAttrStyle(details[attr], True if attr == "price_level" else False) #yikes...
+			if attr in details:
+				attribute = {
+					"label": attr.split('_')[0].title(),
+					"value": {
+						"label": str(details[attr]).title(),
+						"style": self.getAttrStyle(details[attr], True if attr == "price_level" else False) #yikes...
+					}
 				}
-			}
-			attributes.append(attribute)
+				attributes.append(attribute)
 		return attributes
 
-	def getNearByFood(self, key):
+	def getNearByFood(self, key, keyword=""):
 		results = []
-		nearbyURL = self.generatePlaceURL(key)
+		nearbyURL = self.generatePlaceURL(key, keyword=keyword) if keyword else self.generatePlaceURL(key)
 		r = requests.get(nearbyURL)
 		response = r.json()
 		results += response["results"]
@@ -152,7 +158,7 @@ class CommandView(APIView):
 		return randPlace
 
 	def getPlaceDetails(self, placeID, key):
-		placeDetailURL = self.generatePlaceURL(key, None, placeID)
+		placeDetailURL = self.generatePlaceURL(key, placeID=placeID)
 		r = requests.get(placeDetailURL)
 		return r.json()["result"]
 
